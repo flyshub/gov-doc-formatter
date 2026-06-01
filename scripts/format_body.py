@@ -217,6 +217,89 @@ def classify_paragraph(text: str) -> dict:
     return {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False,
             'is_heading': False, 'level': 'body'}
 
+
+# ── 层级合规检查 ──────────────────────────────────────
+
+# 层级序号映射（用于跳级检测）
+LEVEL_ORDER = {'h1': 1, 'h2': 2, 'h3': 3, 'h4': 4}
+LEVEL_NAMES = {
+    'h1': ('一级', '一、'),
+    'h2': ('二级', '（一）'),
+    'h3': ('三级', '1.'),
+    'h4': ('四级', '(1)'),
+}
+
+
+def detect_hierarchy_issues(body_items: list) -> list:
+    """检测正文层级跳级问题，返回建议列表。
+
+    规则：一级→二级→三级→四级，不可跳级。
+    - h1 后直接 h3 → 跳过了 h2
+    - h1 后直接 h4 → 跳过了 h2 和 h3
+    - h2 后直接 h4 → 跳过了 h3
+
+    不视为违规：
+    - 同级连续（一、→ 二、）
+    - 向上返回（1. → 一、）
+    - 正文穿插
+    """
+    issues = []
+    last_level_num = 0  # 上一个标题的层级数值
+
+    for i, item in enumerate(body_items):
+        # 提取文本
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict) and 'text' in item:
+            text = item['text'].strip()
+        else:
+            continue  # 图片、表格跳过
+
+        if not text:
+            continue
+
+        style = classify_paragraph(text)
+        if not style['is_heading']:
+            continue
+
+        curr_level = style['level']
+        curr_num = LEVEL_ORDER[curr_level]
+
+        if last_level_num > 0 and curr_num > last_level_num + 1:
+            # 跳级了：当前层级比上一个标题层级高了 2 级或更多
+            skipped = []
+            for lv in range(last_level_num + 1, curr_num):
+                for lname, lnum in LEVEL_ORDER.items():
+                    if lnum == lv:
+                        name, example = LEVEL_NAMES[lname]
+                        skipped.append(f'{name}（{example}）')
+
+            prev_name, prev_example = LEVEL_NAMES.get(
+                {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[last_level_num])
+            curr_name, curr_example = LEVEL_NAMES[curr_level]
+
+            suggestion = (
+                f'层级跳级：{prev_name}标题后直接出现{curr_name}标题'
+                f'（"{text[:30]}"），跳过了{"、".join(skipped)}。'
+                f'建议在中间插入被跳过的层级标题，'
+                f'或将当前段落降级为被跳过的层级。'
+            )
+
+            issues.append({
+                'index': i,
+                'text': text[:60],
+                'level': curr_level,
+                'prev_level': {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[last_level_num],
+                'skipped': [{'h1': '一级', 'h2': '二级', 'h3': '三级', 'h4': '四级'}[
+                    {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[lv]]
+                    for lv in range(last_level_num + 1, curr_num)],
+                'suggestion': suggestion,
+            })
+
+        last_level_num = curr_num
+
+    return issues
+
 # 称谓专用 style
 STYLE_SALUTATION = {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False,
                     'is_heading': False, 'level': 'salutation'}
@@ -518,12 +601,15 @@ def main():
     parser = argparse.ArgumentParser(description='公文正文排版脚本')
     parser.add_argument('--input', default=None, help='输入 JSON 文件路径')
     parser.add_argument('--stdin', action='store_true', help='从 stdin 读取 JSON（避免临时文件）')
-    parser.add_argument('--output', required=True, help='输出 .docx 文件路径')
+    parser.add_argument('--output', required=False, help='输出 .docx 文件路径')
     parser.add_argument('--font-dir', default=None, help='额外字体目录')
+    parser.add_argument('--check', action='store_true', help='仅校验层级，不生成文档')
     args = parser.parse_args()
 
     if not args.input and not args.stdin:
         parser.error('必须指定 --input 或 --stdin')
+    if not args.check and not args.output:
+        parser.error('生成模式下必须指定 --output')
 
     # 读取输入
     if args.stdin:
@@ -582,11 +668,32 @@ def main():
         print(json.dumps({'status': 'error', 'message': '；'.join(errors)}, ensure_ascii=False))
         sys.exit(1)
 
+    # ── 层级合规检查 ──
+    hierarchy_issues = detect_hierarchy_issues(data.get('正文', []))
+
+    if args.check:
+        # 仅校验模式：输出层级问题后退出
+        result = {
+            'status': 'ok',
+            'check_only': True,
+            'hierarchy_issues': hierarchy_issues,
+        }
+        if hierarchy_issues:
+            result['message'] = f'发现 {len(hierarchy_issues)} 处层级跳级问题'
+        else:
+            result['message'] = '层级顺序符合公文规范'
+        print(json.dumps(result, ensure_ascii=False))
+        return
+
     # 检测可用字体
     available_fonts = detect_available_fonts(args.font_dir)
 
     # 组装文档
     doc, warnings = assemble_document(data, available_fonts)
+
+    # 将层级问题追加到 warnings
+    for issue in hierarchy_issues:
+        warnings.append(issue['suggestion'])
 
     # 保存
     output_path = Path(args.output)
