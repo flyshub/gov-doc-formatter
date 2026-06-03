@@ -13,7 +13,6 @@ R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
 A_NS  = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 
-# ── 中文数字映射 ──
 CN_NUMS = ['一','二','三','四','五','六','七','八','九','十',
            '十一','十二','十三','十四','十五','十六','十七','十八','十九','二十',
            '二十一','二十二','二十三','二十四','二十五','二十六','二十七','二十八','二十九','三十']
@@ -22,8 +21,6 @@ def cn_num(n):
     if 1 <= n <= len(CN_NUMS):
         return CN_NUMS[n-1]
     return str(n)
-
-# ── 编号解析（同前）──────────────────────────────────
 
 def parse_numbering(doc):
     numbering_part = doc.part.numbering_part
@@ -73,13 +70,8 @@ def format_number(fmt, lvl_text, num_value):
     result = re.sub(r'%\d+', '', result)
     return result
 
-# ── 图片提取 ─────────────────────────────────────────
-
 def _extract_images(para_element, rels, zf, img_dir, img_counter):
-    """从段落 XML 提取图片，返回 [{'image': path, 'width_mm': w, 'height_mm': h}]"""
     images = []
-
-    # 1. VML pict 格式（旧 .doc 转换常见）
     for shape in para_element.iterfind('.//{%s}shape' % V_NS):
         w_mm, h_mm = None, None
         style = shape.get('style', '')
@@ -95,7 +87,6 @@ def _extract_images(para_element, rels, zf, img_dir, img_counter):
                 try:
                     w_mm = float(raw_w) * 0.3528
                 except: pass
-
         for imdata in shape.iterfind('.//{%s}imagedata' % V_NS):
             rid = imdata.get('{%s}id' % R_NS)
             if rid and rid in rels:
@@ -107,15 +98,9 @@ def _extract_images(para_element, rels, zf, img_dir, img_counter):
                     img_path = img_dir / f'img_{img_counter[0]:03d}{ext}'
                     img_path.write_bytes(data)
                     png_path, w, h = _convert_to_png(str(img_path), w_mm or 140, h_mm or 100)
-                    images.append({
-                        'image': png_path,
-                        'width_mm': w,
-                        'height_mm': h,
-                    })
+                    images.append({'image': png_path, 'width_mm': w, 'height_mm': h})
                 except Exception:
                     pass
-
-    # 2. 现代 drawing 格式
     for drawing in para_element.iterfind('.//{%s}drawing' % W_NS):
         w_mm, h_mm = None, None
         for ext in drawing.iterfind('.//{%s}extent' % WP_NS):
@@ -125,7 +110,6 @@ def _extract_images(para_element, rels, zf, img_dir, img_counter):
                 w_mm = cx / 360000 * 25.4
             if cy:
                 h_mm = cy / 360000 * 25.4
-
         for blip in drawing.iterfind('.//{%s}blip' % A_NS):
             rid = blip.get('{%s}embed' % R_NS)
             if rid and rid in rels:
@@ -137,19 +121,12 @@ def _extract_images(para_element, rels, zf, img_dir, img_counter):
                     img_path = img_dir / f'img_{img_counter[0]:03d}{ext}'
                     img_path.write_bytes(data)
                     png_path, w, h = _convert_to_png(str(img_path), w_mm or 140, h_mm or 100)
-                    images.append({
-                        'image': png_path,
-                        'width_mm': w,
-                        'height_mm': h,
-                    })
+                    images.append({'image': png_path, 'width_mm': w, 'height_mm': h})
                 except Exception:
                     pass
-
     return images
 
-
 def _convert_to_png(img_path, width_mm, height_mm):
-    """将 EMF/WMF 转为 PNG，返回新路径或原路径"""
     ext = Path(img_path).suffix.lower()
     if ext not in ('.emf', '.wmf'):
         return img_path, width_mm, height_mm
@@ -169,16 +146,10 @@ def _convert_to_png(img_path, width_mm, height_mm):
     except Exception:
         return img_path, width_mm, height_mm
 
-
-# ── 主提取函数 ───────────────────────────────────────
-
 def extract_with_numbering(filepath, image_dir=None):
-    """提取文档文本和图片，含自动编号和加粗格式。返回混合列表 [str|dict]"""
     doc = Document(filepath)
     num_map = parse_numbering(doc)
-
     zf = zipfile.ZipFile(filepath)
-
     rels = {}
     try:
         rels_xml = zf.read('word/_rels/document.xml.rels')
@@ -190,34 +161,25 @@ def extract_with_numbering(filepath, image_dir=None):
                 rels[rid] = target
     except Exception:
         pass
-
     if image_dir:
         img_dir = Path(image_dir)
     else:
         img_dir = Path(tempfile.mkdtemp(prefix='govdoc_imgs_'))
     img_dir.mkdir(parents=True, exist_ok=True)
-
     img_counter = [0]
     counters = {}
     items = []
-
     body = doc.element.body
-
     for child in body:
         tag = etree.QName(child).localname if child.tag != etree.Comment else ''
-
         if tag == 'p':
             images = _extract_images(child, rels, zf, img_dir, img_counter)
-
-            # ── 提取 run 级别加粗信息 ──
             pPr = child.find('{%s}pPr' % W_NS)
             para_rPr = pPr.find('{%s}rPr' % W_NS) if pPr is not None else None
-
             runs = []
             for r_elem in child.findall('.//{%s}r' % W_NS):
                 rPr = r_elem.find('{%s}rPr' % W_NS)
                 is_bold = False
-                # 检查 run 自身 bold
                 if rPr is not None:
                     b = rPr.find('{%s}b' % W_NS)
                     bCs = rPr.find('{%s}bCs' % W_NS)
@@ -229,22 +191,17 @@ def extract_with_numbering(filepath, image_dir=None):
                         val = bCs.get('{%s}val' % W_NS)
                         if val is not None and val != '0' and val.lower() != 'false':
                             is_bold = True
-                # 检查段落默认 bold
                 if not is_bold and para_rPr is not None:
                     pb = para_rPr.find('{%s}b' % W_NS)
                     if pb is not None:
                         val = pb.get('{%s}val' % W_NS)
                         if val is None or (val != '0' and val.lower() != 'false'):
                             is_bold = True
-
                 r_texts = r_elem.findall('.//{%s}t' % W_NS)
                 r_text = ''.join(t.text or '' for t in r_texts)
                 if r_text.strip():
                     runs.append({'text': r_text, 'bold': is_bold})
-
             plain_text = ''.join(r['text'] for r in runs)
-
-            # 自动编号
             numPr = pPr.find('{%s}numPr' % W_NS) if pPr is not None else None
             number_prefix = ''
             if numPr is not None:
@@ -265,10 +222,7 @@ def extract_with_numbering(filepath, image_dir=None):
                             if lvl > ilvl:
                                 del counters[numId][lvl]
                         number_prefix = format_number(level_def['fmt'], level_def['text'], num_value)
-
             full_text = (number_prefix + plain_text).strip() if (number_prefix or plain_text) else ''
-
-            # 判断是否有加粗，决定输出格式
             has_bold = any(r['bold'] for r in runs)
             if has_bold and full_text:
                 output_runs = []
@@ -282,28 +236,14 @@ def extract_with_numbering(filepath, image_dir=None):
                         items.append(full_text)
                 elif full_text:
                     items.append(full_text)
-
             if images:
                 for img in images:
                     items.append(img)
-
         elif tag == 'tbl':
-            rows = child.findall('{%s}tr' % W_NS)
-            table_data = []
-            for row in rows:
-                cells = row.findall('{%s}tc' % W_NS)
-                row_data = []
-                for cell in cells:
-                    ct = ''.join(t.text or '' for t in cell.findall('.//{%s}t' % W_NS))
-                    row_data.append(ct.strip())
-                if any(row_data):
-                    table_data.append(row_data)
-            if table_data:
-                items.append({'table': table_data})
-
+            tbl_xml = etree.tostring(child, encoding='unicode')
+            items.append({'table_xml': tbl_xml})
     zf.close()
     return items
-
 
 if __name__ == '__main__':
     filepath = sys.argv[1]
