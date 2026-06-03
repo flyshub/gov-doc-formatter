@@ -91,6 +91,9 @@ def main():
                     elif "table_xml" in item:
                         if not isinstance(item["table_xml"], str) or not item["table_xml"].strip():
                             errors.append(f"正文第{i+1}段 table_xml 无效")
+                    elif "toc_xml" in item:
+                        if not isinstance(item["toc_xml"], str) or not item["toc_xml"].strip():
+                            errors.append(f"正文第{i+1}段 toc_xml 无效")
                     elif "text" in item:
                         if not isinstance(item["text"], str) or not item["text"].strip():
                             errors.append(f'正文第{i+1}段 text 为空')
@@ -103,7 +106,7 @@ def main():
                                     if not isinstance(r, dict) or "text" not in r:
                                         errors.append(f'正文第{i+1}段 runs[{ri}] 格式无效')
                     else:
-                        errors.append(f'正文第{i+1}段缺少 text、image、table 或 table_xml 字段')
+                        errors.append(f'正文第{i+1}段缺少 text、image、table、table_xml 或 toc_xml 字段')
                 else:
                     errors.append(f"正文第{i+1}段格式无效")
 
