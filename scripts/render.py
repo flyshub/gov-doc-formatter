@@ -23,7 +23,6 @@ _HEADING_SPLIT_RE = re.compile(
 
 
 def setup_page(doc: Document):
-    """A4 页面设置。"""
     s = doc.sections[0]
     s.page_width = Mm(210)
     s.page_height = Mm(297)
@@ -34,7 +33,6 @@ def setup_page(doc: Document):
 
 
 def _add_page_text_run(para, text, font_name="宋体", size=SIZE_4):
-    """添加页码文本 run，设置中文字体。"""
     run = para.add_run(text)
     run.font.size = size
     rPr = run._element.get_or_add_rPr()
@@ -45,7 +43,6 @@ def _add_page_text_run(para, text, font_name="宋体", size=SIZE_4):
 
 
 def add_page_number(doc: Document):
-    """页脚居中页码：— 1 — 宋体四号。"""
     s = doc.sections[0]
     footer = s.footer
     footer.is_linked_to_previous = False
@@ -69,7 +66,6 @@ def add_page_number(doc: Document):
 
 
 def add_title(doc: Document, text, available_fonts, warnings):
-    """标题：方正小标宋简体 二号 居中。"""
     af = resolve_font("方正小标宋简体", available_fonts, warnings)
     para = doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -83,7 +79,6 @@ def add_title(doc: Document, text, available_fonts, warnings):
 
 def add_body_paragraph(doc: Document, text, style, available_fonts, warnings,
                        alignment=None, no_indent=False, runs=None):
-    """添加一段正文/标题段落。"""
     af = resolve_font(style["font_name"], available_fonts, warnings)
     bf = resolve_font("仿宋_GB2312", available_fonts, warnings)
     is_heading = style.get("is_heading", False)
@@ -107,8 +102,18 @@ def add_body_paragraph(doc: Document, text, style, available_fonts, warnings,
         for r in runs:
             rt = r['text']
             rb = r.get('bold', False)
+            rf = r.get('font')
+            run_font = rf if rf else (af if is_heading else bf)
             run = para.add_run(rt)
-            set_cn_font(run, af if is_heading else bf, size, bold or rb)
+            set_cn_font(run, run_font, size, bold or rb)
+            if rf:
+                rPr = run._element.get_or_add_rPr()
+                rFonts = rPr.find(qn('w:rFonts'))
+                if rFonts is None:
+                    rFonts = OxmlElement('w:rFonts')
+                    rPr.insert(0, rFonts)
+                rFonts.set(qn('w:ascii'), rf)
+                rFonts.set(qn('w:hAnsi'), rf)
         return
     heading_split = None
     if is_heading:
@@ -176,7 +181,6 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
                     '', item["table_xml"]
                 )
                 tbl_elem = etree.fromstring(clean_xml)
-                # 插入到 sectPr 之前（append 会放到 sectPr 之后导致表格跑末尾）
                 sectPr = doc.element.body.find('{%s}sectPr' % _W_NS)
                 if sectPr is not None:
                     sectPr.addprevious(deepcopy(tbl_elem))
