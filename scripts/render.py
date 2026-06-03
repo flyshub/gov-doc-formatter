@@ -16,6 +16,7 @@ from fonts import (resolve_font, set_cn_font, set_line_spacing_28,
                     set_first_line_indent, add_spacer, warn)
 from hierarchy import classify_paragraph, STYLE_SALUTATION
 
+_W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 _HEADING_SPLIT_RE = re.compile(
     r"^([一二三四五六七八九十]+、|[（(][一二三四五六七八九十]+[）)])"
 )
@@ -170,13 +171,17 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
 
         if isinstance(item, dict) and "table_xml" in item:
             try:
-                # 移除 WPS 自定义命名空间声明，防止与目标文档 NS 冲突
                 clean_xml = re.sub(
                     r'\s+xmlns:wpsCustomData="http://www\.wps\.cn/officeDocument/2013/wpsCustomData"',
                     '', item["table_xml"]
                 )
                 tbl_elem = etree.fromstring(clean_xml)
-                doc.element.body.append(deepcopy(tbl_elem))
+                # 插入到 sectPr 之前（append 会放到 sectPr 之后导致表格跑末尾）
+                sectPr = doc.element.body.find('{%s}sectPr' % _W_NS)
+                if sectPr is not None:
+                    sectPr.addprevious(deepcopy(tbl_elem))
+                else:
+                    doc.element.body.append(deepcopy(tbl_elem))
             except Exception as e:
                 warn(warnings, f"表格 XML 注入失败: {e}")
             add_spacer(doc, "仿宋_GB2312", available_fonts, warnings, count=1)
