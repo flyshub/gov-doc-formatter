@@ -26,34 +26,44 @@ def classify_paragraph(text: str) -> dict:
 def detect_hierarchy_issues(body_items: list) -> list:
     issues = []
     last_level_num = 0
+
     for i, item in enumerate(body_items):
         if isinstance(item, str):
             text = item.strip()
         elif isinstance(item, dict) and "text" in item:
+            if "toc_xml" in item or "table_xml" in item:
+                continue  # 目录/表格不参与层级检查
             text = item["text"].strip()
         else:
             continue
+
         if not text:
             continue
+
         style = classify_paragraph(text)
         if not style["is_heading"]:
             continue
+
         curr_num = LEVEL_ORDER[style["level"]]
+
         if last_level_num > 0 and curr_num > last_level_num + 1:
             skipped = []
             for lv in range(last_level_num + 1, curr_num):
                 key = LEVEL_NUM_TO_KEY[lv]
                 name, example = LEVEL_NAMES[key]
                 skipped.append(f"{name}（{example}）")
+
             prev_key = LEVEL_NUM_TO_KEY[last_level_num]
             prev_name, _ = LEVEL_NAMES[prev_key]
             curr_name, _ = LEVEL_NAMES[style["level"]]
+
             suggestion = (
                 f"层级跳级：{prev_name}标题后直接出现{curr_name}标题"
                 f"（\"{text[:30]}\"），跳过了{"、".join(skipped)}。"
                 f"建议在中间插入被跳过的层级标题，"
                 f"或将当前段落降级为被跳过的层级。"
             )
+
             issues.append({
                 "index": i,
                 "text": text[:60],
@@ -63,5 +73,7 @@ def detect_hierarchy_issues(body_items: list) -> list:
                             for lv in range(last_level_num + 1, curr_num)],
                 "suggestion": suggestion,
             })
+
         last_level_num = curr_num
+
     return issues
