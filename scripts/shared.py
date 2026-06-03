@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """shared type definitions — types contract between extract and format modules."""
+
 from pathlib import Path
 from typing import TypedDict, Union, List, Dict
 
@@ -12,6 +13,7 @@ class ExtractedImage(TypedDict, total=False):
 
 class ExtractedTable(TypedDict, total=False):
     table: List[List[str]]
+    table_xml: str  # 完整 <w:tbl> XML 字符串，保留全部格式
 
 
 ExtractedItem = Union[str, ExtractedImage, ExtractedTable]
@@ -28,6 +30,7 @@ class FormatInput(TypedDict, total=False):
 
 
 def adapt_extract_output(raw: list, fallback_title: str = "未命名公文") -> FormatInput:
+    """Adapt extract_docx.py output to format_body.py input."""
     import re
     HEADING_PATTERNS = [
         r"^[一二三四五六七八九十]+、",
