@@ -108,6 +108,19 @@ rm <工作目录>/_gov_input.json
 
 > ⚠️ **禁止用 bash heredoc 构建 JSON**（中文弯引号 `""` 会被破坏）。必须用 Python 构建。
 > ⚠️ **Windows 下避免用 `/tmp/`** 传临时文件——Git Bash 和 Python subprocess 的 `/tmp/` 路径映射可能不一致。
+> ⚠️ **三步串联时注意中间文件生命周期**——`_build_json.py` 等中间文件不要在完整流程结束前清理。
+
+**极简：`--from-extract` 模式**（无需中间文件，提取输出直接生成）：
+```bash
+# 提取后直接管道生成，一条命令搞定
+PYTHONIOENCODING=utf-8 python <skill_dir>/scripts/extract_docx.py <输入文件> <图片目录> > /tmp/extract.json
+PYTHONIOENCODING=utf-8 python <skill_dir>/scripts/format_body.py \
+  --from-extract \
+  --input /tmp/extract.json \
+  --output <工作目录>/<文件名>.docx
+```
+
+> 适用：原文结构无需大改（不调整层级、不需要拆分段落）。复杂调整仍需 AI 手动构建 JSON。
 
 备选：文件模式（`--input`）：
 ```bash
@@ -133,3 +146,18 @@ PYTHONIOENCODING=utf-8 python <skill_dir>/scripts/format_body.py \
 ## 参见
 
 排版参数细节见 [REFERENCE.md](REFERENCE.md)
+
+## 模块结构
+
+```
+scripts/
+  constants.py   — 纯数据常量（页面/字体/层级）
+  fonts.py       — 字体工具（检测/解析/设置）
+  hierarchy.py   — 层级分类+跳级检测（纯函数，可单测）
+  render.py      — 文档渲染函数族
+  shared.py      — 类型定义+ImageContext+适配器
+  format_body.py — CLI入口+文档组装
+  extract_docx.py — .docx 文本/图片提取
+  extract_doc.py  — .doc 旧格式转换
+  batch_format.py — 批量处理（import调用，非subprocess）
+```
