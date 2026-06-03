@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""公文正文排版 — CLI 入口与文档组装。
-
-使用方式：
-    python -m scripts.format_body --input data.json --output out.docx
-    或直接调用 main() 编排完整排版流程。
-"""
+"""公文正文排版 — CLI 入口与文档组装。"""
 
 import argparse, json, sys, re
 from pathlib import Path
@@ -18,18 +13,14 @@ from render import setup_page, add_page_number, ELEMENTS
 
 
 def assemble_document(data, available_fonts):
-    """组装公文文档，返回 (Document, warnings)。"""
     warnings = []
     bf = resolve_font("仿宋_GB2312", available_fonts, warnings)
-
     doc = Document()
     doc.styles["Normal"].font.size = SIZE_3
     setup_page(doc)
     add_page_number(doc)
-
     for render in ELEMENTS:
         render(doc, data, available_fonts, warnings, bf)
-
     return doc, warnings
 
 
@@ -41,7 +32,7 @@ def main():
     parser.add_argument("--font-dir", default=None, help="额外字体目录")
     parser.add_argument("--check", action="store_true", help="仅校验层级，不生成文档")
     parser.add_argument("--from-extract", action="store_true",
-                        help="输入为 extract_docx.py 原始输出（列表），自动提取标题和正文")
+                        help="输入为 extract_docx.py 原始输出，自动提取标题和正文")
     args = parser.parse_args()
 
     if not args.input and not args.stdin:
@@ -55,7 +46,6 @@ def main():
         with open(args.input, "r", encoding="utf-8") as f:
             raw = json.load(f)
 
-    # --from-extract: 智能提取标题
     if args.from_extract:
         if isinstance(raw, list) and len(raw) > 0:
             first = raw[0]
@@ -74,7 +64,6 @@ def main():
 
     data = raw
 
-    # ── 输入校验 ──
     errors = []
     if not isinstance(data, dict):
         errors.append("输入 JSON 必须是对象")
@@ -94,10 +83,12 @@ def main():
                     elif "table" in item:
                         if not isinstance(item["table"], list):
                             errors.append(f"正文第{i+1}段表格格式无效")
+                    elif "table_xml" in item:
+                        if not isinstance(item["table_xml"], str) or not item["table_xml"].strip():
+                            errors.append(f"正文第{i+1}段 table_xml 无效")
                     elif "text" in item:
                         if not isinstance(item["text"], str) or not item["text"].strip():
                             errors.append(f'正文第{i+1}段 text 为空')
-                        # 校验 runs 字段（可选）
                         runs = item.get("runs")
                         if runs is not None:
                             if not isinstance(runs, list):
@@ -107,7 +98,7 @@ def main():
                                     if not isinstance(r, dict) or "text" not in r:
                                         errors.append(f'正文第{i+1}段 runs[{ri}] 格式无效')
                     else:
-                        errors.append(f'正文第{i+1}段缺少 text、image 或 table 字段')
+                        errors.append(f'正文第{i+1}段缺少 text、image、table 或 table_xml 字段')
                 else:
                     errors.append(f"正文第{i+1}段格式无效")
 
@@ -126,11 +117,9 @@ def main():
                         errors.append(f"附件第{i+1}项为空或格式无效")
 
     if errors:
-        print(json.dumps(
-            {"status": "error", "message": "；".join(errors)}, ensure_ascii=False))
+        print(json.dumps({"status": "error", "message": "；".join(errors)}, ensure_ascii=False))
         sys.exit(1)
 
-    # ── 层级合规检查 ──
     hierarchy_issues = detect_hierarchy_issues(data.get("正文", []))
 
     if args.check:
@@ -142,7 +131,6 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         return
 
-    # ── 生成文档 ──
     available_fonts = detect_available_fonts(args.font_dir)
     doc, warnings = assemble_document(data, available_fonts)
 
@@ -153,11 +141,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
 
-    result = {
-        "status": "ok",
-        "path": str(output_path.resolve()),
-        "warnings": warnings,
-    }
+    result = {"status": "ok", "path": str(output_path.resolve()), "warnings": warnings}
     print(json.dumps(result, ensure_ascii=False))
 
 
