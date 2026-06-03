@@ -170,7 +170,12 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
 
         if isinstance(item, dict) and "table_xml" in item:
             try:
-                tbl_elem = etree.fromstring(item["table_xml"])
+                # 移除 WPS 自定义命名空间声明，防止与目标文档 NS 冲突
+                clean_xml = re.sub(
+                    r'\s+xmlns:wpsCustomData="http://www\.wps\.cn/officeDocument/2013/wpsCustomData"',
+                    '', item["table_xml"]
+                )
+                tbl_elem = etree.fromstring(clean_xml)
                 doc.element.body.append(deepcopy(tbl_elem))
             except Exception as e:
                 warn(warnings, f"表格 XML 注入失败: {e}")
