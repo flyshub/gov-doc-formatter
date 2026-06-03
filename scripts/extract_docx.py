@@ -39,7 +39,6 @@ def parse_numbering(doc):
             fmt = numFmt.get('{%s}val' % W_NS) if numFmt is not None else 'decimal'
             text_tmpl = lvlText.get('{%s}val' % W_NS) if lvlText is not None else '%1'
             start_val = int(start.get('{%s}val' % W_NS)) if start is not None else 1
-            # 提取编号的 rPr（字体/加粗等）
             lvl_rPr = lvl.find('{%s}rPr' % W_NS)
             rPr_info = {}
             if lvl_rPr is not None:
@@ -184,6 +183,8 @@ def extract_with_numbering(filepath, image_dir=None):
     img_counter = [0]
     counters = {}
     items = []
+    in_toc = False
+
     body = doc.element.body
     for child in body:
         tag = etree.QName(child).localname if child.tag != etree.Comment else ''
@@ -227,6 +228,28 @@ def extract_with_numbering(filepath, image_dir=None):
                         rd['font'] = run_font
                     runs.append(rd)
             plain_text = ''.join(r['text'] for r in runs)
+
+            # ── 目录检测：原样保留目录区域 ──
+            if not in_toc and plain_text.strip() == '目录':
+                in_toc = True
+                items.append({'toc_xml': etree.tostring(child, encoding='unicode'),
+                              'text': plain_text.strip()})
+                if images:
+                    for img in images:
+                        items.append(img)
+                continue
+            if in_toc:
+                is_toc_entry = bool(re.search(r'\d+$', plain_text.strip()))
+                if is_toc_entry:
+                    items.append({'toc_xml': etree.tostring(child, encoding='unicode'),
+                                  'text': plain_text.strip()})
+                    if images:
+                        for img in images:
+                            items.append(img)
+                    continue
+                else:
+                    in_toc = False
+
             numPr = pPr.find('{%s}numPr' % W_NS) if pPr is not None else None
             number_prefix = ''
             number_font = None
