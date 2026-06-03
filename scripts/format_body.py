@@ -8,7 +8,6 @@ import re
 import sys
 from pathlib import Path
 
-# 修复 Windows GBK 终端下中文输出乱码
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
@@ -19,40 +18,27 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-# ── 常量 ──────────────────────────────────────────────
-
-# 页面边距
-PAGE_TOP_MM    = 37   # 天头
+PAGE_TOP_MM    = 37
 PAGE_BOTTOM_MM = 28
-PAGE_LEFT_MM   = 28   # 订口
+PAGE_LEFT_MM   = 28
 PAGE_RIGHT_MM  = 26
-
-# 行距（固定值，磅）
 LINE_SPACING_PT = 28
-
-# 字号对照（中文号数 → 磅值）
-SIZE_2 = Pt(22)  # 二号
-SIZE_3 = Pt(16)  # 三号
-SIZE_4 = Pt(14)  # 四号
-
-# 首行缩进（字符数）
+SIZE_2 = Pt(22)
+SIZE_3 = Pt(16)
+SIZE_4 = Pt(14)
 INDENT_CHARS = 2
 
-# 正文层级正则匹配表（按优先级排列）
 LEVEL_PATTERNS = [
-    # (正则,           层级名,  字体名,              加粗)
     (r'^[一二三四五六七八九十]+、',     'h1', '黑体',         False),
     (r'^[（(][一二三四五六七八九十]+[）)]', 'h2', '楷体_GB2312',  False),
     (r'^\d+[.、]',                      'h3', '仿宋_GB2312',  False),
     (r'^[（(]\d+[）)]',                 'h4', '仿宋_GB2312',  False),
 ]
 
-# 一二级标题序数正则（由 LEVEL_PATTERNS 组合，用于字体分割检测）
-_h1 = LEVEL_PATTERNS[0][0].lstrip('^')  # [一二三四五六七八九十]+、
-_h2 = LEVEL_PATTERNS[1][0].lstrip('^')  # （[一二三四五六七八九十]+）
+_h1 = LEVEL_PATTERNS[0][0].lstrip('^')
+_h2 = LEVEL_PATTERNS[1][0].lstrip('^')
 HEADING_SPLIT_RE = re.compile(r'^(' + _h1 + '|' + _h2 + ')')
 
-# 字体名称 → 系统实际字体名映射（按优先级排列）
 FONT_CANDIDATES = {
     '方正小标宋简体': ['方正小标宋简体', 'FZXiaoBiaoSong-B05S', 'FZXiaoBiaoSong'],
     '黑体':           ['黑体', 'SimHei'],
@@ -60,7 +46,6 @@ FONT_CANDIDATES = {
     '仿宋_GB2312':    ['仿宋_GB2312', 'FangSong_GB2312', 'FangSong', '仿宋'],
 }
 
-# 字体回退表（最终兜底）
 FONT_FALLBACK = {
     '方正小标宋简体': '宋体',
     '黑体':           'SimHei',
@@ -68,15 +53,17 @@ FONT_FALLBACK = {
     '仿宋_GB2312':    '仿宋',
 }
 
-# ── 工具函数 ──────────────────────────────────────────
+LEVEL_ORDER = {'h1': 1, 'h2': 2, 'h3': 3, 'h4': 4}
+LEVEL_NAMES = {
+    'h1': ('一级', '一、'), 'h2': ('二级', '（一）'),
+    'h3': ('三级', '1.'), 'h4': ('四级', '(1)'),
+}
 
 def warn(warnings: list, msg: str):
     warnings.append(msg)
     print(f"  ⚠ {msg}", file=sys.stderr)
 
-
 def resolve_font(desired_name: str, available_fonts: set, warnings: list) -> str:
-    """根据期望的字体逻辑名，在系统中查找实际可用字体名"""
     candidates = FONT_CANDIDATES.get(desired_name, [desired_name])
     for name in candidates:
         if name in available_fonts:
@@ -85,12 +72,9 @@ def resolve_font(desired_name: str, available_fonts: set, warnings: list) -> str
     warn(warnings, f"字体 '{desired_name}' 未找到，回退为 '{fallback}'")
     return fallback
 
-
 def set_cn_font(run, font_name: str, size: Pt, bold: bool = False):
-    """设置中文字体，同时设置西文回退为 Times New Roman"""
     run.font.size = size
     run.bold = bold
-    # 中文字体
     rPr = run._element.get_or_add_rPr()
     rFonts = rPr.find(qn('w:rFonts'))
     if rFonts is None:
@@ -101,26 +85,19 @@ def set_cn_font(run, font_name: str, size: Pt, bold: bool = False):
     rFonts.set(qn('w:hAnsi'), 'Times New Roman')
     rFonts.set(qn('w:cs'), 'Times New Roman')
 
-
 def set_line_spacing_28(paragraph):
-    """设置段落行距为固定值28磅"""
     pPr = paragraph._element.get_or_add_pPr()
     spacing = pPr.find(qn('w:spacing'))
     if spacing is None:
         spacing = OxmlElement('w:spacing')
         pPr.append(spacing)
-    spacing.set(qn('w:line'), str(int(LINE_SPACING_PT * 20)))  # 行距单位：1/20 磅
-    spacing.set(qn('w:lineRule'), 'exact')  # 固定值
+    spacing.set(qn('w:line'), str(int(LINE_SPACING_PT * 20)))
+    spacing.set(qn('w:lineRule'), 'exact')
 
-
-def set_first_line_indent(paragraph, chars: int = INDENT_CHARS):
-    """设置首行缩进 N 字符"""
+def set_first_line_indent(paragraph, chars=INDENT_CHARS):
     paragraph.paragraph_format.first_line_indent = Pt(SIZE_3.pt * chars)
 
-
-def add_spacer(doc: Document, font_name: str, available_fonts: set,
-               warnings: list, count: int = 1):
-    """添加空行（count 个固定行距空段落）"""
+def add_spacer(doc: Document, font_name: str, available_fonts: set, warnings: list, count=1):
     actual_font = resolve_font(font_name, available_fonts, warnings)
     for _ in range(count):
         para = doc.add_paragraph()
@@ -130,11 +107,7 @@ def add_spacer(doc: Document, font_name: str, available_fonts: set,
         run = para.add_run('')
         set_cn_font(run, actual_font, SIZE_3, False)
 
-
-# ── 排版函数 ──────────────────────────────────────────
-
 def setup_page(doc: Document):
-    """A4 页面设置"""
     section = doc.sections[0]
     section.page_width  = Mm(210)
     section.page_height = Mm(297)
@@ -143,48 +116,36 @@ def setup_page(doc: Document):
     section.left_margin   = Mm(PAGE_LEFT_MM)
     section.right_margin  = Mm(PAGE_RIGHT_MM)
 
-
 def add_page_number(doc: Document):
-    """页脚居中页码：— 1 — 宋体四号"""
     section = doc.sections[0]
     footer = section.footer
     footer.is_linked_to_previous = False
-
     para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     para.paragraph_format.space_before = Pt(0)
     para.paragraph_format.space_after  = Pt(0)
-
-    # "— "
     run1 = para.add_run('— ')
     run1.font.size = SIZE_4
     rPr = run1._element.get_or_add_rPr()
     rFonts = OxmlElement('w:rFonts')
     rFonts.set(qn('w:eastAsia'), '宋体')
     rPr.insert(0, rFonts)
-
-    # PAGE field
     run2 = para.add_run()
     run2.font.size = SIZE_4
     rPr2 = run2._element.get_or_add_rPr()
     rFonts2 = OxmlElement('w:rFonts')
     rFonts2.set(qn('w:eastAsia'), '宋体')
     rPr2.insert(0, rFonts2)
-
     fldChar_begin = OxmlElement('w:fldChar')
     fldChar_begin.set(qn('w:fldCharType'), 'begin')
     run2._element.append(fldChar_begin)
-
     instrText = OxmlElement('w:instrText')
     instrText.set(qn('xml:space'), 'preserve')
     instrText.text = ' PAGE '
     run2._element.append(instrText)
-
     fldChar_end = OxmlElement('w:fldChar')
     fldChar_end.set(qn('w:fldCharType'), 'end')
     run2._element.append(fldChar_end)
-
-    # " —"
     run3 = para.add_run(' —')
     run3.font.size = SIZE_4
     rPr3 = run3._element.get_or_add_rPr()
@@ -192,167 +153,87 @@ def add_page_number(doc: Document):
     rFonts3.set(qn('w:eastAsia'), '宋体')
     rPr3.insert(0, rFonts3)
 
-
 def add_title(doc: Document, text: str, available_fonts: set, warnings: list):
-    """标题：方正小标宋简体 二号 居中"""
     actual_font = resolve_font('方正小标宋简体', available_fonts, warnings)
-
     para = doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     para.paragraph_format.space_before = Pt(0)
     para.paragraph_format.space_after  = Pt(0)
     set_line_spacing_28(para)
-    # 标题不缩进
     para.paragraph_format.first_line_indent = Pt(0)
     run = para.add_run(text)
     set_cn_font(run, actual_font, SIZE_2, bold=False)
 
-
 def classify_paragraph(text: str) -> dict:
-    """对单段文本分类，返回 style dict"""
     for pattern, level, font_name, bold in LEVEL_PATTERNS:
         if re.match(pattern, text.strip()):
-            return {'font_name': font_name, 'size': SIZE_3, 'bold': bold,
-                    'is_heading': True, 'level': level}
-    return {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False,
-            'is_heading': False, 'level': 'body'}
-
-
-# ── 层级合规检查 ──────────────────────────────────────
-
-# 层级序号映射（用于跳级检测）
-LEVEL_ORDER = {'h1': 1, 'h2': 2, 'h3': 3, 'h4': 4}
-LEVEL_NAMES = {
-    'h1': ('一级', '一、'),
-    'h2': ('二级', '（一）'),
-    'h3': ('三级', '1.'),
-    'h4': ('四级', '(1)'),
-}
-
+            return {'font_name': font_name, 'size': SIZE_3, 'bold': bold, 'is_heading': True, 'level': level}
+    return {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False, 'is_heading': False, 'level': 'body'}
 
 def detect_hierarchy_issues(body_items: list) -> list:
-    """检测正文层级跳级问题，返回建议列表。
-
-    规则：一级→二级→三级→四级，不可跳级。
-    - h1 后直接 h3 → 跳过了 h2
-    - h1 后直接 h4 → 跳过了 h2 和 h3
-    - h2 后直接 h4 → 跳过了 h3
-
-    不视为违规：
-    - 同级连续（一、→ 二、）
-    - 向上返回（1. → 一、）
-    - 正文穿插
-    """
     issues = []
-    last_level_num = 0  # 上一个标题的层级数值
-
+    last_level_num = 0
     for i, item in enumerate(body_items):
-        # 提取文本
         if isinstance(item, str):
             text = item.strip()
         elif isinstance(item, dict) and 'text' in item:
             text = item['text'].strip()
         else:
-            continue  # 图片、表格跳过
-
+            continue
         if not text:
             continue
-
         style = classify_paragraph(text)
         if not style['is_heading']:
             continue
-
-        curr_level = style['level']
-        curr_num = LEVEL_ORDER[curr_level]
-
+        curr_num = LEVEL_ORDER[style['level']]
         if last_level_num > 0 and curr_num > last_level_num + 1:
-            # 跳级了：当前层级比上一个标题层级高了 2 级或更多
             skipped = []
             for lv in range(last_level_num + 1, curr_num):
                 for lname, lnum in LEVEL_ORDER.items():
                     if lnum == lv:
                         name, example = LEVEL_NAMES[lname]
                         skipped.append(f'{name}（{example}）')
-
-            prev_name, prev_example = LEVEL_NAMES.get(
-                {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[last_level_num])
-            curr_name, curr_example = LEVEL_NAMES[curr_level]
-
-            suggestion = (
-                f'层级跳级：{prev_name}标题后直接出现{curr_name}标题'
-                f'（"{text[:30]}"），跳过了{"、".join(skipped)}。'
-                f'建议在中间插入被跳过的层级标题，'
-                f'或将当前段落降级为被跳过的层级。'
-            )
-
-            issues.append({
-                'index': i,
-                'text': text[:60],
-                'level': curr_level,
-                'prev_level': {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[last_level_num],
-                'skipped': [{'h1': '一级', 'h2': '二级', 'h3': '三级', 'h4': '四级'}[
-                    {1: 'h1', 2: 'h2', 3: 'h3', 4: 'h4'}[lv]]
-                    for lv in range(last_level_num + 1, curr_num)],
-                'suggestion': suggestion,
-            })
-
+            prev_name, _ = LEVEL_NAMES.get({1:'h1',2:'h2',3:'h3',4:'h4'}[last_level_num])
+            curr_name, _ = LEVEL_NAMES[style['level']]
+            suggestion = f'层级跳级：{prev_name}标题后直接出现{curr_name}标题（"{text[:30]}"），跳过了{"、".join(skipped)}。建议在中间插入被跳过的层级标题，或将当前段落降级为被跳过的层级。'
+            issues.append({'index': i, 'text': text[:60], 'level': style['level'], 'prev_level': {1:'h1',2:'h2',3:'h3',4:'h4'}[last_level_num], 'skipped': [{'h1':'一级','h2':'二级','h3':'三级','h4':'四级'}[{1:'h1',2:'h2',3:'h3',4:'h4'}[lv]] for lv in range(last_level_num+1,curr_num)], 'suggestion': suggestion})
         last_level_num = curr_num
-
     return issues
 
-# 称谓专用 style
-STYLE_SALUTATION = {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False,
-                    'is_heading': False, 'level': 'salutation'}
+STYLE_SALUTATION = {'font_name': '仿宋_GB2312', 'size': SIZE_3, 'bold': False, 'is_heading': False, 'level': 'salutation'}
 
-
-def add_body_paragraph(doc: Document, text: str, style: dict,
-                       available_fonts: set, warnings: list,
-                       alignment=None, no_indent: bool = False):
-    """添加一段正文/标题。style: classify_paragraph() 返回值或 STYLE_SALUTATION"""
+def add_body_paragraph(doc: Document, text: str, style: dict, available_fonts: set, warnings: list, alignment=None, no_indent: bool = False):
     actual_font = resolve_font(style['font_name'], available_fonts, warnings)
     body_font = resolve_font('仿宋_GB2312', available_fonts, warnings)
     is_heading = style.get('is_heading', False)
-    bold       = style.get('bold', False)
-    size       = style.get('size', SIZE_3)
-
+    bold = style.get('bold', False)
+    size = style.get('size', SIZE_3)
     para = doc.add_paragraph()
     para.alignment = alignment if alignment is not None else WD_ALIGN_PARAGRAPH.LEFT
     para.paragraph_format.space_before = Pt(0)
     para.paragraph_format.space_after  = Pt(0)
     set_line_spacing_28(para)
-
     if no_indent:
         para.paragraph_format.first_line_indent = Pt(0)
     else:
         set_first_line_indent(para)
-
     stripped = text.strip()
-    # 三级标题 "1." 后补空格
     if re.match(r'^\d+\.', stripped) and not re.match(r'^\d+\.\s', stripped):
         m = re.match(r'^(\d+\.)(.*)', stripped)
         if m:
             stripped = m.group(1) + ' ' + m.group(2)
-
-    # 一二级标题：如果含 ：或 。，分割前缀（标题字体）和后缀（正文仿宋）
     heading_split = None
     if is_heading:
         m = HEADING_SPLIT_RE.match(stripped)
         if m:
-            prefix_marker = m.group(1)
             after_marker = stripped[m.end():]
-            # 找第一个 ：或 。
             split_match = re.search(r'[：。]', after_marker)
             if split_match and len(after_marker[:split_match.start()].strip()) >= 2:
-                cut = m.end() + split_match.end()
-                heading_split = cut  # 分割位置：前缀[:cut]，后缀[cut:]
-
+                heading_split = m.end() + split_match.end()
     if heading_split:
-        prefix = stripped[:heading_split]
-        suffix = stripped[heading_split:].lstrip()
-        # 前缀：标题字体
-        run1 = para.add_run(prefix)
+        run1 = para.add_run(stripped[:heading_split])
         set_cn_font(run1, actual_font, size, bold)
-        # 后缀：正文仿宋
+        suffix = stripped[heading_split:].lstrip()
         if suffix:
             run2 = para.add_run(suffix)
             set_cn_font(run2, body_font, size, False)
@@ -360,94 +241,51 @@ def add_body_paragraph(doc: Document, text: str, style: dict,
         run = para.add_run(stripped)
         set_cn_font(run, actual_font, size, bold)
 
-
-# ── 字体检测 ──────────────────────────────────────────
-
-def detect_available_fonts(font_dir: str = None) -> set:
-    """检测可用字体，返回已安装字体名集合（含多种别名）"""
+def detect_available_fonts(font_dir=None):
     available = set()
-
     import platform
     system = platform.system()
     font_paths = []
-
     if system == 'Windows':
         windir = Path(os.environ.get('WINDIR', 'C:\\Windows'))
-        font_paths = [
-            windir / 'Fonts',
-            Path.home() / 'AppData' / 'Local' / 'Microsoft' / 'Windows' / 'Fonts',
-        ]
+        font_paths = [windir/'Fonts', Path.home()/'AppData'/'Local'/'Microsoft'/'Windows'/'Fonts']
     elif system == 'Darwin':
-        font_paths = [
-            Path('/Library/Fonts'),
-            Path('/System/Library/Fonts'),
-            Path.home() / 'Library' / 'Fonts',
-        ]
+        font_paths = [Path('/Library/Fonts'), Path('/System/Library/Fonts'), Path.home()/'Library'/'Fonts']
     else:
-        font_paths = [
-            Path('/usr/share/fonts'),
-            Path('/usr/local/share/fonts'),
-            Path.home() / '.fonts',
-        ]
-
+        font_paths = [Path('/usr/share/fonts'), Path('/usr/local/share/fonts'), Path.home()/'.fonts']
     if font_dir:
         font_paths.append(Path(font_dir))
-
-    # 1. matplotlib 检测（最可靠，返回真实字体名）
     try:
         from matplotlib.font_manager import fontManager
         for f in fontManager.ttflist:
             available.add(f.name)
     except ImportError:
         pass
-
-    # 2. 直接扫描字体文件（补充文件名作为别名）
     import glob
     for fp in font_paths:
         if fp.exists():
-            for ext in ('*.ttf', '*.ttc', '*.otf', '*.TTF', '*.TTC', '*.OTF'):
+            for ext in ('*.ttf','*.ttc','*.otf','*.TTF','*.TTC','*.OTF'):
                 for f in fp.rglob(ext):
                     available.add(f.stem)
-
-    # 3. 添加已知字体别名，确保中文名也能命中
-    ALIASES = [
-        ('FZXiaoBiaoSong-B05S', '方正小标宋简体'),
-        ('FZXBSJW',             '方正小标宋简体'),
-        ('SimHei',              '黑体'),
-        ('KaiTi_GB2312',        '楷体_GB2312'),
-        ('KaiTi',               '楷体_GB2312'),
-        ('FangSong_GB2312',     '仿宋_GB2312'),
-        ('FangSong',            '仿宋_GB2312'),
-    ]
-    for from_name, to_alias in ALIASES:
-        if from_name in available:
-            available.add(to_alias)
-
+    ALIASES = [('FZXiaoBiaoSong-B05S','方正小标宋简体'),('FZXBSJW','方正小标宋简体'),('SimHei','黑体'),('KaiTi_GB2312','楷体_GB2312'),('KaiTi','楷体_GB2312'),('FangSong_GB2312','仿宋_GB2312'),('FangSong','仿宋_GB2312')]
+    for fn, alias in ALIASES:
+        if fn in available:
+            available.add(alias)
     return available
-
-
-# ── 文档组装 ──────────────────────────────────────────
-
-# ── 文档元素渲染器（输出顺序由 ELEMENTS 列表定义）──────
 
 def _render_title(doc, data, available_fonts, warnings, body_font):
     title = data.get('标题', '').strip()
     if title:
         add_title(doc, title, available_fonts, warnings)
 
-
 def _render_salutation(doc, data, available_fonts, warnings, body_font):
     称谓 = data.get('称谓', '').strip()
     if 称谓:
-        add_body_paragraph(doc, 称谓, STYLE_SALUTATION,
-                          available_fonts, warnings, no_indent=True)
-
+        add_body_paragraph(doc, 称谓, STYLE_SALUTATION, available_fonts, warnings, no_indent=True)
 
 def _render_body(doc, data, available_fonts, warnings, body_font):
-    PAGE_WIDTH_MM = 210 - PAGE_LEFT_MM - PAGE_RIGHT_MM  # 版心宽度 156mm
-
+    PAGE_WIDTH_MM = 210 - PAGE_LEFT_MM - PAGE_RIGHT_MM
     for item in data.get('正文', []):
-        # ── 图片项 ──
         if isinstance(item, dict) and 'image' in item:
             img_path = item['image']
             if not os.path.exists(img_path):
@@ -455,11 +293,9 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
                 continue
             w_mm = min(item.get('width_mm', PAGE_WIDTH_MM), PAGE_WIDTH_MM)
             h_mm = item.get('height_mm', w_mm * 0.75)
-            # 等比缩放
             if item.get('width_mm') and item['width_mm'] > PAGE_WIDTH_MM:
                 ratio = PAGE_WIDTH_MM / item['width_mm']
                 h_mm = item['height_mm'] * ratio
-
             para = doc.add_paragraph()
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             para.paragraph_format.space_before = Pt(6)
@@ -470,59 +306,51 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
                 run.add_picture(img_path, width=Mm(w_mm), height=Mm(h_mm))
             except Exception as e:
                 warn(warnings, f"图片插入失败 ({os.path.basename(img_path)}): {e}")
-                # Remove the empty paragraph we just added
                 p = para._element
                 p.getparent().remove(p)
             continue
 
-        # ── 表格项 ──
         if isinstance(item, dict) and 'table' in item:
             rows = item['table']
             if not rows:
                 continue
-            tbl = doc.add_table(rows=len(rows), cols=len(rows[0]))
+            max_cols = max(len(r) for r in rows)
+            tbl = doc.add_table(rows=len(rows), cols=max_cols)
             tbl.alignment = WD_ALIGN_PARAGRAPH.CENTER
             tbl.autofit = True
-            # Style borders
             tbl.style = 'Table Grid'
             header_font_name = resolve_font('黑体', available_fonts, warnings)
             cell_font_name   = resolve_font('仿宋_GB2312', available_fonts, warnings)
+            title_row = (len(rows) > 1 and len(rows[0]) == 1 and max_cols > 1)
+            header_row_idx = 1 if title_row else 0
             for ri, row_data in enumerate(rows):
                 for ci, cell_text in enumerate(row_data):
-                    if ci >= len(tbl.rows[ri].cells):
-                        break
                     cell = tbl.rows[ri].cells[ci]
-                    # Clear default paragraph
                     cell.paragraphs[0].clear()
                     run = cell.paragraphs[0].add_run(cell_text)
-                    if ri == 0:
+                    if ri <= header_row_idx:
                         set_cn_font(run, header_font_name, Pt(10.5), bold=False)
                         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     else:
                         set_cn_font(run, cell_font_name, Pt(10.5), bold=False)
-            # Add empty paragraph after table for spacing
+                if title_row and ri == 0 and max_cols > 1:
+                    tbl.rows[0].cells[0].merge(tbl.rows[0].cells[max_cols - 1])
             add_spacer(doc, '仿宋_GB2312', available_fonts, warnings, count=1)
             continue
 
-        # ── 文本项 ──
         if isinstance(item, str):
             text = item.strip()
             para_align = None
-            no_indent  = False
+            no_indent = False
         else:
             text = item.get('text', '').strip()
-            align_map = {'left': WD_ALIGN_PARAGRAPH.LEFT,
-                         'right': WD_ALIGN_PARAGRAPH.RIGHT,
-                         'center': WD_ALIGN_PARAGRAPH.CENTER}
+            align_map = {'left': WD_ALIGN_PARAGRAPH.LEFT, 'right': WD_ALIGN_PARAGRAPH.RIGHT, 'center': WD_ALIGN_PARAGRAPH.CENTER}
             para_align = align_map.get(item.get('align'), None)
-            no_indent  = item.get('indent') is False
+            no_indent = item.get('indent') is False
         if not text:
             continue
         style = classify_paragraph(text)
-        add_body_paragraph(doc, text, style,
-                          available_fonts, warnings,
-                          alignment=para_align, no_indent=no_indent)
-
+        add_body_paragraph(doc, text, style, available_fonts, warnings, alignment=para_align, no_indent=no_indent)
 
 def _render_attachments(doc, data, available_fonts, warnings, body_font):
     attachments = data.get('附件', [])
@@ -539,7 +367,6 @@ def _render_attachments(doc, data, available_fonts, warnings, body_font):
         text = f"附件：{i}. {item}" if i == 1 else f"      {i}. {item}"
         run = para.add_run(text)
         set_cn_font(run, body_font, SIZE_3, False)
-
 
 def _render_signature(doc, data, available_fonts, warnings, body_font):
     署名 = data.get('署名', '').strip()
@@ -567,64 +394,40 @@ def _render_signature(doc, data, available_fonts, warnings, body_font):
         run = para.add_run(日期)
         set_cn_font(run, body_font, SIZE_3, False)
 
-
-# 文档元素列表：顺序即输出顺序
-ELEMENTS = [
-    _render_title,
-    _render_salutation,
-    _render_body,
-    _render_attachments,
-    _render_signature,
-]
-
+ELEMENTS = [_render_title, _render_salutation, _render_body, _render_attachments, _render_signature]
 
 def assemble_document(data: dict, available_fonts: set) -> tuple:
-    """组装公文文档，返回 (Document, warnings)。输出顺序由 ELEMENTS 列表定义。"""
     warnings = []
     body_font = resolve_font('仿宋_GB2312', available_fonts, warnings)
-
     doc = Document()
-    default_style = doc.styles['Normal']
-    default_style.font.size = SIZE_3
+    doc.styles['Normal'].font.size = SIZE_3
     setup_page(doc)
     add_page_number(doc)
-
     for render in ELEMENTS:
         render(doc, data, available_fonts, warnings, body_font)
-
     return doc, warnings
-
-
-# ── 主入口 ────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='公文正文排版脚本')
     parser.add_argument('--input', default=None, help='输入 JSON 文件路径')
-    parser.add_argument('--stdin', action='store_true', help='从 stdin 读取 JSON（避免临时文件）')
+    parser.add_argument('--stdin', action='store_true', help='从 stdin 读取 JSON')
     parser.add_argument('--output', required=False, help='输出 .docx 文件路径')
     parser.add_argument('--font-dir', default=None, help='额外字体目录')
     parser.add_argument('--check', action='store_true', help='仅校验层级，不生成文档')
     args = parser.parse_args()
-
     if not args.input and not args.stdin:
         parser.error('必须指定 --input 或 --stdin')
     if not args.check and not args.output:
         parser.error('生成模式下必须指定 --output')
-
-    # 读取输入
     if args.stdin:
         data = json.load(sys.stdin)
     else:
         with open(args.input, 'r', encoding='utf-8') as f:
             data = json.load(f)
-
-    # ── 输入校验 ──
     errors = []
-
     if not isinstance(data, dict):
         errors.append('输入 JSON 必须是对象')
     else:
-        # 必填：正文
         paragraphs = data.get('正文', [])
         if not isinstance(paragraphs, list) or len(paragraphs) == 0:
             errors.append('"正文" 必须是非空数组')
@@ -634,27 +437,22 @@ def main():
                     if not item.strip():
                         errors.append(f'正文第{i+1}段为空字符串')
                 elif isinstance(item, dict):
-                    # 图片项：{"image": "path", "width_mm": w, "height_mm": h}
                     if 'image' in item:
                         if not isinstance(item['image'], str) or not item['image'].strip():
                             errors.append(f'正文第{i+1}段图片路径无效')
-                    # 表格项：{"table": [[cell, ...], ...]}
                     elif 'table' in item:
                         if not isinstance(item['table'], list):
                             errors.append(f'正文第{i+1}段表格格式无效')
                     elif 'text' not in item:
-                        errors.append(f'正文第{i+1}段缺少 "text" 或 "image" 字段')
+                        errors.append(f'正文第{i+1}段缺少 text 或 image 字段')
                     elif not isinstance(item['text'], str) or not item['text'].strip():
-                        errors.append(f'正文第{i+1}段 "text" 为空')
+                        errors.append(f'正文第{i+1}段 text 为空')
                 else:
-                    errors.append(f'正文第{i+1}段格式无效：必须是字符串或对象')
-
-        # 可选字段类型校验
+                    errors.append(f'正文第{i+1}段格式无效')
         for field in ['标题', '称谓', '署名', '日期']:
             val = data.get(field, '')
             if val and not isinstance(val, str):
                 errors.append(f'"{field}" 必须是字符串')
-
         if '附件' in data:
             att = data['附件']
             if not isinstance(att, list):
@@ -663,50 +461,24 @@ def main():
                 for i, item in enumerate(att):
                     if not isinstance(item, str) or not item.strip():
                         errors.append(f'附件第{i+1}项为空或格式无效')
-
     if errors:
         print(json.dumps({'status': 'error', 'message': '；'.join(errors)}, ensure_ascii=False))
         sys.exit(1)
-
-    # ── 层级合规检查 ──
     hierarchy_issues = detect_hierarchy_issues(data.get('正文', []))
-
     if args.check:
-        # 仅校验模式：输出层级问题后退出
-        result = {
-            'status': 'ok',
-            'check_only': True,
-            'hierarchy_issues': hierarchy_issues,
-        }
-        if hierarchy_issues:
-            result['message'] = f'发现 {len(hierarchy_issues)} 处层级跳级问题'
-        else:
-            result['message'] = '层级顺序符合公文规范'
+        result = {'status': 'ok', 'check_only': True, 'hierarchy_issues': hierarchy_issues}
+        result['message'] = f'发现 {len(hierarchy_issues)} 处层级跳级问题' if hierarchy_issues else '层级顺序符合公文规范'
         print(json.dumps(result, ensure_ascii=False))
         return
-
-    # 检测可用字体
     available_fonts = detect_available_fonts(args.font_dir)
-
-    # 组装文档
     doc, warnings = assemble_document(data, available_fonts)
-
-    # 将层级问题追加到 warnings
     for issue in hierarchy_issues:
         warnings.append(issue['suggestion'])
-
-    # 保存
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
-
-    result = {
-        'status': 'ok',
-        'path': str(output_path.resolve()),
-        'warnings': warnings,
-    }
+    result = {'status': 'ok', 'path': str(output_path.resolve()), 'warnings': warnings}
     print(json.dumps(result, ensure_ascii=False))
-
 
 if __name__ == '__main__':
     main()
