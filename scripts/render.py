@@ -174,6 +174,18 @@ def _render_body(doc, data, available_fonts, warnings, body_font):
                 p.getparent().remove(p)
             continue
 
+        if isinstance(item, dict) and "toc_xml" in item:
+            try:
+                p_elem = etree.fromstring(item["toc_xml"])
+                sectPr = doc.element.body.find('{%s}sectPr' % _W_NS)
+                if sectPr is not None:
+                    sectPr.addprevious(deepcopy(p_elem))
+                else:
+                    doc.element.body.append(deepcopy(p_elem))
+            except Exception as e:
+                warn(warnings, f"目录段落注入失败: {e}")
+            continue
+
         if isinstance(item, dict) and "table_xml" in item:
             try:
                 clean_xml = re.sub(
