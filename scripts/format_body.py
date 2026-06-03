@@ -13,14 +13,19 @@ from render import setup_page, add_page_number, ELEMENTS
 
 
 def assemble_document(data, available_fonts):
+    """组装公文文档，返回 (Document, warnings)。"""
     warnings = []
     bf = resolve_font("仿宋_GB2312", available_fonts, warnings)
+
     doc = Document()
-    doc.styles["Normal"].font.size = SIZE_3
+    # 不设全局 Normal 字号——表格 deepcopy 后 ASCII 文本会继承此值导致字号偏大。
+    # 所有正文段落已通过 add_body_paragraph → set_cn_font 显式设置字号。
     setup_page(doc)
     add_page_number(doc)
+
     for render in ELEMENTS:
         render(doc, data, available_fonts, warnings, bf)
+
     return doc, warnings
 
 
