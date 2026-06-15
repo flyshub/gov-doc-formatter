@@ -99,6 +99,14 @@ def add_body_paragraph(doc: Document, text, style, available_fonts, warnings,
         if m:
             stripped = m.group(1) + " " + m.group(2)
     if runs:
+        heading_split = None
+        if is_heading:
+            m = _HEADING_SPLIT_RE.match(stripped)
+            if m:
+                after_marker = stripped[m.end():]
+                sm = re.search(r"[：。]", after_marker)
+                if sm and len(after_marker[:sm.start()].strip()) >= 2:
+                    heading_split = m.end() + sm.end()
         for r in runs:
             rt = r['text']
             rb = r.get('bold', False)
@@ -114,6 +122,8 @@ def add_body_paragraph(doc: Document, text, style, available_fonts, warnings,
                     rPr.insert(0, rFonts)
                 rFonts.set(qn('w:ascii'), rf)
                 rFonts.set(qn('w:hAnsi'), rf)
+        if heading_split:
+            pass  # heading_split is informational; runs already carry their own text
         return
     heading_split = None
     if is_heading:

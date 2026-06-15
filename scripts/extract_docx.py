@@ -177,129 +177,138 @@ def extract_with_numbering(filepath, image_dir=None):
         pass
     if image_dir:
         img_dir = Path(image_dir)
+        owns_img_dir = False
     else:
         img_dir = Path(tempfile.mkdtemp(prefix='govdoc_imgs_'))
+        owns_img_dir = True
     img_dir.mkdir(parents=True, exist_ok=True)
     img_counter = [0]
     counters = {}
     items = []
     in_toc = False
 
-    body = doc.element.body
-    for child in body:
-        tag = etree.QName(child).localname if child.tag != etree.Comment else ''
-        if tag == 'p':
-            images = _extract_images(child, rels, zf, img_dir, img_counter)
-            pPr = child.find('{%s}pPr' % W_NS)
-            para_rPr = pPr.find('{%s}rPr' % W_NS) if pPr is not None else None
-            runs = []
-            for r_elem in child.findall('.//{%s}r' % W_NS):
-                rPr = r_elem.find('{%s}rPr' % W_NS)
-                is_bold = False
-                run_font = None
-                if rPr is not None:
-                    b = rPr.find('{%s}b' % W_NS)
-                    bCs = rPr.find('{%s}bCs' % W_NS)
-                    if b is not None:
-                        val = b.get('{%s}val' % W_NS)
-                        if val is None or (val != '0' and val.lower() != 'false'):
-                            is_bold = True
-                    if not is_bold and bCs is not None:
-                        val = bCs.get('{%s}val' % W_NS)
-                        if val is not None and val != '0' and val.lower() != 'false':
-                            is_bold = True
-                    rFonts = rPr.find('{%s}rFonts' % W_NS)
-                    if rFonts is not None:
-                        ea = rFonts.get('{%s}eastAsia' % W_NS)
-                        asc = rFonts.get('{%s}ascii' % W_NS)
-                        ha = rFonts.get('{%s}hAnsi' % W_NS)
-                        run_font = asc or ha or ea
-                if not is_bold and para_rPr is not None:
-                    pb = para_rPr.find('{%s}b' % W_NS)
-                    if pb is not None:
-                        val = pb.get('{%s}val' % W_NS)
-                        if val is None or (val != '0' and val.lower() != 'false'):
-                            is_bold = True
-                r_texts = r_elem.findall('.//{%s}t' % W_NS)
-                r_text = ''.join(t.text or '' for t in r_texts)
-                if r_text.strip():
-                    rd = {'text': r_text, 'bold': is_bold}
-                    if run_font:
-                        rd['font'] = run_font
-                    runs.append(rd)
-            plain_text = ''.join(r['text'] for r in runs)
+    try:
+        body = doc.element.body
+        for child in body:
+            tag = etree.QName(child).localname if child.tag != etree.Comment else ''
+            if tag == 'p':
+                images = _extract_images(child, rels, zf, img_dir, img_counter)
+                pPr = child.find('{%s}pPr' % W_NS)
+                para_rPr = pPr.find('{%s}rPr' % W_NS) if pPr is not None else None
+                runs = []
+                for r_elem in child.findall('.//{%s}r' % W_NS):
+                    rPr = r_elem.find('{%s}rPr' % W_NS)
+                    is_bold = False
+                    run_font = None
+                    if rPr is not None:
+                        b = rPr.find('{%s}b' % W_NS)
+                        bCs = rPr.find('{%s}bCs' % W_NS)
+                        if b is not None:
+                            val = b.get('{%s}val' % W_NS)
+                            if val is None or (val != '0' and val.lower() != 'false'):
+                                is_bold = True
+                        if not is_bold and bCs is not None:
+                            val = bCs.get('{%s}val' % W_NS)
+                            if val is not None and val != '0' and val.lower() != 'false':
+                                is_bold = True
+                        rFonts = rPr.find('{%s}rFonts' % W_NS)
+                        if rFonts is not None:
+                            ea = rFonts.get('{%s}eastAsia' % W_NS)
+                            asc = rFonts.get('{%s}ascii' % W_NS)
+                            ha = rFonts.get('{%s}hAnsi' % W_NS)
+                            run_font = asc or ha or ea
+                    if not is_bold and para_rPr is not None:
+                        pb = rPr.find('{%s}b' % W_NS) if rPr is not None else None
+                        if pb is not None:
+                            val = pb.get('{%s}val' % W_NS)
+                            if val is None or (val != '0' and val.lower() != 'false'):
+                                is_bold = True
+                    r_texts = r_elem.findall('.//{%s}t' % W_NS)
+                    r_text = ''.join(t.text or '' for t in r_texts)
+                    if r_text.strip():
+                        rd = {'text': r_text, 'bold': is_bold}
+                        if run_font:
+                            rd['font'] = run_font
+                        runs.append(rd)
+                plain_text = ''.join(r['text'] for r in runs)
 
-            # ── 目录检测：原样保留目录区域 ──
-            if not in_toc and plain_text.strip() == '目录':
-                in_toc = True
-                items.append({'toc_xml': etree.tostring(child, encoding='unicode'),
-                              'text': plain_text.strip()})
-                if images:
-                    for img in images:
-                        items.append(img)
-                continue
-            if in_toc:
-                is_toc_entry = bool(re.search(r'\d+$', plain_text.strip()))
-                if is_toc_entry:
+                # ── 目录检测：原样保留目录区域 ──
+                if not in_toc and plain_text.strip() == '目录':
+                    in_toc = True
                     items.append({'toc_xml': etree.tostring(child, encoding='unicode'),
                                   'text': plain_text.strip()})
                     if images:
                         for img in images:
                             items.append(img)
                     continue
-                else:
-                    in_toc = False
+                if in_toc:
+                    is_toc_entry = bool(re.search(r'\d+$', plain_text.strip()))
+                    if is_toc_entry:
+                        items.append({'toc_xml': etree.tostring(child, encoding='unicode'),
+                                      'text': plain_text.strip()})
+                        if images:
+                            for img in images:
+                                items.append(img)
+                        continue
+                    else:
+                        in_toc = False
 
-            numPr = pPr.find('{%s}numPr' % W_NS) if pPr is not None else None
-            number_prefix = ''
-            number_font = None
-            number_bold = False
-            if numPr is not None:
-                ilvl_elem = numPr.find('{%s}ilvl' % W_NS)
-                numId_elem = numPr.find('{%s}numId' % W_NS)
-                if ilvl_elem is not None and numId_elem is not None:
-                    ilvl = int(ilvl_elem.get('{%s}val' % W_NS))
-                    numId = numId_elem.get('{%s}val' % W_NS)
-                    if numId in num_map and ilvl in num_map[numId]:
-                        level_def = num_map[numId][ilvl]
-                        if numId not in counters:
-                            counters[numId] = {}
-                        if ilvl not in counters[numId]:
-                            counters[numId][ilvl] = level_def['start']
-                        num_value = counters[numId][ilvl]
-                        counters[numId][ilvl] = num_value + 1
-                        for lvl in list(counters[numId].keys()):
-                            if lvl > ilvl:
-                                del counters[numId][lvl]
-                        number_prefix = format_number(level_def['fmt'], level_def['text'], num_value)
-                        num_rPr = level_def.get('rPr')
-                        if num_rPr:
-                            number_font = num_rPr.get('font')
-                            number_bold = num_rPr.get('bold', False)
-            full_text = (number_prefix + plain_text).strip() if (number_prefix or plain_text) else ''
-            has_bold = any(r['bold'] for r in runs)
-            needs_runs = has_bold or number_font is not None
-            if needs_runs and full_text:
-                output_runs = []
-                if number_prefix:
-                    pr = {'text': number_prefix, 'bold': number_bold}
-                    if number_font:
-                        pr['font'] = number_font
-                    output_runs.append(pr)
-                output_runs.extend(runs)
-                items.append({'text': full_text, 'runs': output_runs})
-            else:
-                if images:
-                    if full_text:
+                numPr = pPr.find('{%s}numPr' % W_NS) if pPr is not None else None
+                number_prefix = ''
+                number_font = None
+                number_bold = False
+                if numPr is not None:
+                    ilvl_elem = numPr.find('{%s}ilvl' % W_NS)
+                    numId_elem = numPr.find('{%s}numId' % W_NS)
+                    if ilvl_elem is not None and numId_elem is not None:
+                        ilvl = int(ilvl_elem.get('{%s}val' % W_NS))
+                        numId = numId_elem.get('{%s}val' % W_NS)
+                        if numId in num_map and ilvl in num_map[numId]:
+                            level_def = num_map[numId][ilvl]
+                            if numId not in counters:
+                                counters[numId] = {}
+                            if ilvl not in counters[numId]:
+                                counters[numId][ilvl] = level_def['start']
+                            num_value = counters[numId][ilvl]
+                            counters[numId][ilvl] = num_value + 1
+                            for lvl in list(counters[numId].keys()):
+                                if lvl > ilvl:
+                                    del counters[numId][lvl]
+                            number_prefix = format_number(level_def['fmt'], level_def['text'], num_value)
+                            num_rPr = level_def.get('rPr')
+                            if num_rPr:
+                                number_font = num_rPr.get('font')
+                                number_bold = num_rPr.get('bold', False)
+                full_text = (number_prefix + plain_text).strip() if (number_prefix or plain_text) else ''
+                has_bold = any(r['bold'] for r in runs)
+                needs_runs = has_bold or number_font is not None
+                if needs_runs and full_text:
+                    output_runs = []
+                    if number_prefix:
+                        pr = {'text': number_prefix, 'bold': number_bold}
+                        if number_font:
+                            pr['font'] = number_font
+                        output_runs.append(pr)
+                    output_runs.extend(runs)
+                    items.append({'text': full_text, 'runs': output_runs})
+                else:
+                    if images:
+                        if full_text:
+                            items.append(full_text)
+                    elif full_text:
                         items.append(full_text)
-                elif full_text:
-                    items.append(full_text)
-            if images:
-                for img in images:
-                    items.append(img)
-        elif tag == 'tbl':
-            tbl_xml = etree.tostring(child, encoding='unicode')
-            items.append({'table_xml': tbl_xml})
+                if images:
+                    for img in images:
+                        items.append(img)
+            elif tag == 'tbl':
+                tbl_xml = etree.tostring(child, encoding='unicode')
+                items.append({'table_xml': tbl_xml})
+    finally:
+        if owns_img_dir:
+            try:
+                shutil.rmtree(img_dir)
+            except Exception:
+                pass
     zf.close()
     return items
 
