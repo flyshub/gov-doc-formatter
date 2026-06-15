@@ -4,6 +4,8 @@
 from pathlib import Path
 from typing import TypedDict, Union, List, Dict
 
+from constants import HEAD_RE_PATTERNS
+
 
 class ExtractedImage(TypedDict, total=False):
     image: str
@@ -32,17 +34,11 @@ class FormatInput(TypedDict, total=False):
 def adapt_extract_output(raw: list, fallback_title: str = "未命名公文") -> FormatInput:
     """Adapt extract_docx.py output to format_body.py input."""
     import re
-    HEADING_PATTERNS = [
-        r"^[一二三四五六七八九十]+、",
-        r"^[（(][一二三四五六七八九十]+[）)]",
-        r"^\d+[.、]",
-        r"^[（(]\d+[）)]",
-    ]
     if not isinstance(raw, list) or len(raw) == 0:
         return {"标题": fallback_title, "正文": []}
     first = raw[0]
     if isinstance(first, str) and not any(
-        re.match(p, first.strip()) for p in HEADING_PATTERNS
+        re.match(p, first.strip()) for p in HEAD_RE_PATTERNS
     ):
         return {"标题": first, "正文": raw[1:]}
     return {"标题": f"{fallback_title} [AI自动生成，请核实]", "正文": raw}

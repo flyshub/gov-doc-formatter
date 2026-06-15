@@ -6,7 +6,7 @@ from pathlib import Path
 
 from docx import Document
 
-from constants import SIZE_3, LEVEL_PATTERNS
+from constants import SIZE_3, LEVEL_PATTERNS, HEAD_RE_PATTERNS
 from fonts import resolve_font, detect_available_fonts
 from hierarchy import detect_hierarchy_issues
 from render import setup_page, add_page_number, ELEMENTS
@@ -55,7 +55,7 @@ def main():
         if isinstance(raw, list) and len(raw) > 0:
             first = raw[0]
             if isinstance(first, str) and not any(
-                re.match(p, first.strip()) for p, *_ in LEVEL_PATTERNS
+                re.match(p, first.strip()) for p in HEAD_RE_PATTERNS
             ):
                 raw = {"标题": first, "正文": raw[1:]}
             else:

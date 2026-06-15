@@ -24,6 +24,14 @@ LEVEL_PATTERNS = [
     (r"^[（(]\d+[）)]",                 "h4", "仿宋_GB2312",  False),
 ]
 
+# 用于 adapt_extract_output / --from-extract 的标题识别正则（仅 pattern 部分）
+HEAD_RE_PATTERNS = [
+    r"^[一二三四五六七八九十]+、",
+    r"^[（(][一二三四五六七八九十]+[）)]",
+    r"^\d+[.、]",
+    r"^[（(]\d+[）)]",
+]
+
 # ── 字体映射 ──────────────────────────────────────────
 FONT_CANDIDATES = {
     "方正小标宋简体": ["方正小标宋简体", "FZXiaoBiaoSong-B05S", "FZXiaoBiaoSong"],
