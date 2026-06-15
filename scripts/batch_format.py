@@ -12,6 +12,26 @@ from fonts import detect_available_fonts
 from shared import ImageContext, adapt_extract_output
 
 
+def _doc_to_docx(filepath, tmpdir):
+    """将 .doc 通过 Word COM 转换为 .docx，返回 .docx 路径。"""
+    import win32com.client
+    abs_path = os.path.abspath(filepath)
+    docx_path = os.path.join(tmpdir, "_converted.docx")
+    word = win32com.client.Dispatch("Word.Application")
+    try:
+        word.Visible = False
+        word.DisplayAlerts = False
+        doc = word.Documents.Open(abs_path)
+        doc.SaveAs2(docx_path, FileFormat=16)
+        doc.Close()
+    finally:
+        try:
+            word.Quit()
+        except Exception:
+            pass
+    return docx_path
+
+
 def process_one(filepath, output_dir, available_fonts):
     filepath = Path(filepath).resolve()
     ext = filepath.suffix.lower()
@@ -22,15 +42,9 @@ def process_one(filepath, output_dir, available_fonts):
             if ext == ".docx":
                 items = extract_with_numbering(str(filepath), ctx.dir)
             elif ext == ".doc":
-                import subprocess
-                SCRIPT_DIR = Path(__file__).resolve().parent
-                result = subprocess.run(
-                    [sys.executable, str(SCRIPT_DIR / "extract_doc.py"),
-                     str(filepath), ctx.dir],
-                    capture_output=True, text=True, encoding="utf-8")
-                if result.returncode != 0:
-                    return ("error", None, [result.stderr.strip()])
-                items = json.loads(result.stdout)
+                docx_path = _doc_to_docx(str(filepath), ctx.dir)
+                ctx.register_temp(docx_path)
+                items = extract_with_numbering(docx_path, ctx.dir)
             else:
                 text = filepath.read_text(encoding="utf-8")
                 lines = [l.strip() for l in text.split("\n") if l.strip()]

@@ -52,14 +52,25 @@ class ImageContext:
         import tempfile
         self.cleanup = cleanup
         self.dir = directory if directory else tempfile.mkdtemp(prefix="govdoc_imgs_")
+        self._temp_files = []
 
     def __enter__(self):
         Path(self.dir).mkdir(parents=True, exist_ok=True)
         return self
 
+    def register_temp(self, path):
+        """注册临时文件，__exit__ 时自动清理。"""
+        self._temp_files.append(path)
+
     def __exit__(self, *args):
         if self.cleanup:
             import shutil
+            for p in self._temp_files:
+                try:
+                    if Path(p).exists():
+                        Path(p).unlink()
+                except Exception:
+                    pass
             try:
                 shutil.rmtree(self.dir)
             except Exception:
